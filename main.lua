@@ -31,6 +31,7 @@ local Vora = {
     KillAuraTarget = "",
     SpinbotEnabled = true,
     SpinSpeed = 45,
+    RapidFire = false,
     
     -- Misc Settings
     WalkSpeed = 16,
@@ -41,11 +42,11 @@ local Vora = {
 
 -- // Visual Helpers
 local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
-FOVCircle.NumSides = 100
+FOVCircle.Thickness = 1
+FOVCircle.NumSides = 60
 FOVCircle.Radius = Vora.AimFOV
 FOVCircle.Visible = Vora.AimEnabled
-FOVCircle.Color = Vora.Accent
+FOVCircle.Color = Color3.new(1, 1, 1) -- WHITE FOV
 FOVCircle.Transparency = 1
 
 -- // UI Framework
@@ -113,7 +114,7 @@ local ESPContainer = CreateContainer()
 local HvHContainer = CreateContainer()
 local MiscContainer = CreateContainer()
 
--- // ESP Setup logic
+-- // ESP Setup
 local function CreateESP(plr)
     local box = Drawing.new("Square")
     box.Visible = false
@@ -139,14 +140,16 @@ local function GetClosest()
     local mouse = UserInputService:GetMouseLocation()
     for _, p in pairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and IsValid(p) then
-            if Vora.WallCheckOnSelect then
-                local parts = Camera:GetPartsObscuringTarget({p.Character.Head.Position}, {LocalPlayer.Character, p.Character})
-                if #parts > 0 then continue end
-            end
             local pos, vis = Camera:WorldToViewportPoint(p.Character.Head.Position)
             if vis then
                 local dist = (Vector2.new(pos.X, pos.Y) - mouse).Magnitude
-                if dist < closest then target = p; closest = dist end
+                if dist < closest then 
+                    if Vora.WallCheckOnSelect then
+                        local parts = Camera:GetPartsObscuringTarget({p.Character.Head.Position}, {LocalPlayer.Character, p.Character})
+                        if #parts > 0 then continue end
+                    end
+                    target = p; closest = dist 
+                end
             end
         end
     end
@@ -185,7 +188,7 @@ local function CreateSlider(name, min, max, default, parent, callback)
     end)
 end
 
--- // AIMLOCK TAB (RESTORED)
+-- // AIMLOCK TAB
 CreateToggle("Enable Lock", true, AimContainer, function(v) Vora.AimEnabled = v; FOVCircle.Visible = v end)
 CreateToggle("Wall Check", true, AimContainer, function(v) Vora.WallCheckOnSelect = v end)
 CreateToggle("Smart KO Check", true, AimContainer, function(v) Vora.SmartKOCheck = v end)
@@ -205,7 +208,7 @@ CreateSlider("FOV Size", 30, 800, 150, AimContainer, function(v) Vora.AimFOV = v
 -- // ESP TAB
 CreateToggle("Box ESP", false, ESPContainer, function(v) Vora.ESPEnabled = v end)
 
--- // HVH TAB (SCROLL FIX APPLIED)
+-- // HVH TAB
 local ListScroll = Instance.new("ScrollingFrame", HvHContainer)
 ListScroll.Size = UDim2.new(1, 0, 0, 150); ListScroll.BackgroundColor3 = Color3.fromRGB(15, 15, 15); ListScroll.BorderSizePixel = 0; ListScroll.ScrollBarThickness = 4; ListScroll.ScrollBarImageColor3 = Vora.Accent
 local ListLayout = Instance.new("UIListLayout", ListScroll); ListLayout.Padding = UDim.new(0, 5)
@@ -221,12 +224,13 @@ local function UpdateList()
             b.MouseButton1Click:Connect(function() Vora.KillAuraTarget = p.Name; UpdateList() end)
         end
     end
-    ListScroll.CanvasSize = UDim2.new(0, 0, 0, (count * 35)) -- Dynamic height calculation
+    ListScroll.CanvasSize = UDim2.new(0, 0, 0, (count * 35))
 end
 UpdateList(); Players.PlayerAdded:Connect(UpdateList); Players.PlayerRemoving:Connect(UpdateList)
 
 CreateToggle("Kill Aura", false, HvHContainer, function(v) Vora.KillAuraEnabled = v end)
 CreateToggle("Spinbot", true, HvHContainer, function(v) Vora.SpinbotEnabled = v end)
+CreateToggle("Rapid Fire", false, HvHContainer, function(v) Vora.RapidFire = v end)
 CreateSlider("Spin Speed", 10, 200, 45, HvHContainer, function(v) Vora.SpinSpeed = v end)
 
 -- // MISC TAB
@@ -252,9 +256,29 @@ MiscTabBtn.MouseButton1Click:Connect(function() OpenTab(MiscContainer, MiscTabBt
 
 -- // Main Loop
 local SpinTick = 0
+local IsMouseDown = false
+
+UserInputService.InputBegan:Connect(function(i, gpe)
+    if gpe then return end
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then IsMouseDown = true end
+end)
+
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 then IsMouseDown = false end
+end)
+
 RunService.RenderStepped:Connect(function()
     FOVCircle.Position = UserInputService:GetMouseLocation()
     if Vora.SpinbotEnabled then SpinTick = SpinTick + Vora.SpinSpeed end
+
+    -- Rapid Fire Loop
+    if Vora.RapidFire and IsMouseDown then
+        local Tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+        if Tool then 
+            Tool:Activate()
+            Tool.Enabled = true 
+        end
+    end
 
     -- Speed
     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
@@ -287,23 +311,28 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Aimlock 
+    -- Aimlock (Target Point Adjusted to avoid camera dip)
     if Vora.AimEnabled and Vora.LockedTarget then
         if not IsValid(Vora.LockedTarget) then Vora.LockedTarget = nil else
-            local head = Vora.LockedTarget.Character.Head
             local root = Vora.LockedTarget.Character:FindFirstChild("HumanoidRootPart")
-            local tPos = head.Position + (root and root.Velocity * Vora.Prediction or Vector3.zero)
-            local targetCF = CFrame.new(Camera.CFrame.Position, tPos)
-            if Vora.Smoothing <= 0 then Camera.CFrame = targetCF else Camera.CFrame = Camera.CFrame:Lerp(targetCF, 1 - Vora.Smoothing) end
+            local targetPos = root.Position + Vector3.new(0, 1.5, 0) + (root.Velocity * Vora.Prediction)
+            local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
+            
+            if Vora.Smoothing <= 0 then 
+                Camera.CFrame = targetCF 
+            else 
+                local lerpSpeed = 1 - math.clamp(Vora.Smoothing, 0, 0.9)
+                Camera.CFrame = Camera.CFrame:Lerp(targetCF, lerpSpeed) 
+            end
         end
     end
 
-    -- ESP Boxes
+    -- Optimized ESP Boxes
     for plr, box in pairs(Vora.ESPObjects) do
         if Vora.ESPEnabled and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
             local hrp = plr.Character.HumanoidRootPart
             local pos, vis = Camera:WorldToViewportPoint(hrp.Position)
-            if vis then
+            if vis and (Camera.CFrame.Position - hrp.Position).Magnitude < 1500 then
                 local top = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3, 0))
                 local bottom = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, -3.5, 0))
                 local h = math.abs(top.Y - bottom.Y)
@@ -324,4 +353,4 @@ UserInputService.InputBegan:Connect(function(i, gpe)
     if Vora.WalkKey and (i.KeyCode == Vora.WalkKey or i.UserInputType == Vora.WalkKey) then Vora.WalkToggle = not Vora.WalkToggle end
 end)
 
-print("VORA PRIVATE // ELITE V11 - LIST FIX LOADED")
+print("VORA PRIVATE // ELITE V11 - RAPID UPDATE")
