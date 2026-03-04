@@ -1,6 +1,3 @@
--- [[ VORA PRIVATE // ELITE V11 - FULL RED EDITION ]] --
--- Menu Toggle: RIGHT CONTROL
-
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -29,8 +26,9 @@ local Vora = {
     -- HVH Settings
     KillAuraEnabled = false,
     KillAuraTarget = "",
-    SpinbotEnabled = true,
-    SpinSpeed = 45,
+    OrbitSpeed = 45,
+    OrbitDistance = 5,
+    OrbitHeight = 3,
     RapidFire = false,
     
     -- Misc Settings
@@ -102,7 +100,7 @@ local function CreateContainer()
     c.Size = UDim2.new(1, -40, 1, -120)
     c.Position = UDim2.new(0, 20, 0, 115)
     c.BackgroundTransparency = 1
-    c.CanvasSize = UDim2.new(0, 0, 0, 650)
+    c.CanvasSize = UDim2.new(0, 0, 0, 700)
     c.ScrollBarThickness = 0
     c.Visible = false
     Instance.new("UIListLayout", c).Padding = UDim.new(0, 15)
@@ -228,10 +226,11 @@ local function UpdateList()
 end
 UpdateList(); Players.PlayerAdded:Connect(UpdateList); Players.PlayerRemoving:Connect(UpdateList)
 
-CreateToggle("Kill Aura", false, HvHContainer, function(v) Vora.KillAuraEnabled = v end)
-CreateToggle("Spinbot", true, HvHContainer, function(v) Vora.SpinbotEnabled = v end)
+CreateToggle("Kill Aura (Orbit)", false, HvHContainer, function(v) Vora.KillAuraEnabled = v end)
 CreateToggle("Rapid Fire", false, HvHContainer, function(v) Vora.RapidFire = v end)
-CreateSlider("Spin Speed", 10, 200, 45, HvHContainer, function(v) Vora.SpinSpeed = v end)
+CreateSlider("Orbit Speed", 10, 250, 45, HvHContainer, function(v) Vora.OrbitSpeed = v end)
+CreateSlider("Orbit Distance", 1, 30, 5, HvHContainer, function(v) Vora.OrbitDistance = v end)
+CreateSlider("Orbit Height", -10, 20, 3, HvHContainer, function(v) Vora.OrbitHeight = v end)
 
 -- // MISC TAB
 local SpeedBindBtn = Instance.new("TextButton", MiscContainer); SpeedBindBtn.Size = UDim2.new(1, 0, 0, 45); SpeedBindBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20); SpeedBindBtn.Text = "SET SPEED KEY"; SpeedBindBtn.Font = Enum.Font.GothamBold; SpeedBindBtn.TextColor3 = Color3.new(1,1,1); SpeedBindBtn.BorderSizePixel = 0
@@ -255,7 +254,7 @@ HvHTabBtn.MouseButton1Click:Connect(function() OpenTab(HvHContainer, HvHTabBtn) 
 MiscTabBtn.MouseButton1Click:Connect(function() OpenTab(MiscContainer, MiscTabBtn) end)
 
 -- // Main Loop
-local SpinTick = 0
+local OrbitTick = 0
 local IsMouseDown = false
 
 UserInputService.InputBegan:Connect(function(i, gpe)
@@ -269,15 +268,12 @@ end)
 
 RunService.RenderStepped:Connect(function()
     FOVCircle.Position = UserInputService:GetMouseLocation()
-    if Vora.SpinbotEnabled then SpinTick = SpinTick + Vora.SpinSpeed end
+    OrbitTick = OrbitTick + (Vora.OrbitSpeed / 100)
 
-    -- Rapid Fire Loop
+    -- Rapid Fire
     if Vora.RapidFire and IsMouseDown then
         local Tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-        if Tool then 
-            Tool:Activate()
-            Tool.Enabled = true 
-        end
+        if Tool then Tool:Activate() Tool.Enabled = true end
     end
 
     -- Speed
@@ -285,7 +281,7 @@ RunService.RenderStepped:Connect(function()
         LocalPlayer.Character.Humanoid.WalkSpeed = Vora.WalkToggle and Vora.WalkSpeed or 16
     end
 
-    -- HVH Aura
+    -- HVH Aura (Orbit Logic)
     if Vora.KillAuraEnabled and Vora.KillAuraTarget ~= "" then
         local targetPlr = Players:FindFirstChild(Vora.KillAuraTarget)
         if targetPlr and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
@@ -293,16 +289,11 @@ RunService.RenderStepped:Connect(function()
             if targetChar and targetChar:FindFirstChild("HumanoidRootPart") then
                 local targetHRP = targetChar.HumanoidRootPart
                 if IsValid(targetPlr) then
-                    local RayParams = RaycastParams.new()
-                    RayParams.FilterDescendantsInstances = {targetChar, LocalPlayer.Character}
-                    local RayResult = workspace:Raycast(targetHRP.Position, Vector3.new(0, 50, 0), RayParams)
-                    local spinAngle = Vora.SpinbotEnabled and CFrame.Angles(0, math.rad(SpinTick), 0) or CFrame.Angles(0,0,0)
-
-                    if RayResult then
-                        LocalPlayer.Character.HumanoidRootPart.CFrame = targetHRP.CFrame * CFrame.new(0, 0, 3) * spinAngle
-                    else
-                        LocalPlayer.Character.HumanoidRootPart.CFrame = targetHRP.CFrame * CFrame.new(0, 12, 0) * spinAngle
-                    end
+                    local offsetX = math.cos(OrbitTick) * Vora.OrbitDistance
+                    local offsetZ = math.sin(OrbitTick) * Vora.OrbitDistance
+                    local finalPos = targetHRP.Position + Vector3.new(offsetX, Vora.OrbitHeight, offsetZ)
+                    
+                    LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(finalPos, targetHRP.Position)
                     Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHRP.Position)
                 else
                     LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(targetHRP.Position.X, 1000, targetHRP.Position.Z)
@@ -311,28 +302,24 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Aimlock (Target Point Adjusted to avoid camera dip)
+    -- Aimlock
     if Vora.AimEnabled and Vora.LockedTarget then
         if not IsValid(Vora.LockedTarget) then Vora.LockedTarget = nil else
             local root = Vora.LockedTarget.Character:FindFirstChild("HumanoidRootPart")
             local targetPos = root.Position + Vector3.new(0, 1.5, 0) + (root.Velocity * Vora.Prediction)
             local targetCF = CFrame.new(Camera.CFrame.Position, targetPos)
-            
-            if Vora.Smoothing <= 0 then 
-                Camera.CFrame = targetCF 
-            else 
-                local lerpSpeed = 1 - math.clamp(Vora.Smoothing, 0, 0.9)
-                Camera.CFrame = Camera.CFrame:Lerp(targetCF, lerpSpeed) 
+            if Vora.Smoothing <= 0 then Camera.CFrame = targetCF else 
+                Camera.CFrame = Camera.CFrame:Lerp(targetCF, 1 - math.clamp(Vora.Smoothing, 0, 0.9)) 
             end
         end
     end
 
-    -- Optimized ESP Boxes
+    -- ESP Boxes
     for plr, box in pairs(Vora.ESPObjects) do
         if Vora.ESPEnabled and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
             local hrp = plr.Character.HumanoidRootPart
             local pos, vis = Camera:WorldToViewportPoint(hrp.Position)
-            if vis and (Camera.CFrame.Position - hrp.Position).Magnitude < 1500 then
+            if vis then
                 local top = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, 3, 0))
                 local bottom = Camera:WorldToViewportPoint(hrp.Position + Vector3.new(0, -3.5, 0))
                 local h = math.abs(top.Y - bottom.Y)
@@ -353,4 +340,4 @@ UserInputService.InputBegan:Connect(function(i, gpe)
     if Vora.WalkKey and (i.KeyCode == Vora.WalkKey or i.UserInputType == Vora.WalkKey) then Vora.WalkToggle = not Vora.WalkToggle end
 end)
 
-print("VORA PRIVATE // ELITE V11 - RAPID UPDATE")
+print("VORA PRIVATE // ELITE V11 - ORBIT EDITION")
